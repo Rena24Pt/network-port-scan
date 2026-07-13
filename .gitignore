@@ -19,10 +19,11 @@ env/
 .coverage
 htmlcov/
 
-# Editor / OS cruft
+# Editor / OS / tooling cruft
 .vscode/
 .idea/
 .DS_Store
+.claude/
 
 # Scan output files
 *.report.txt

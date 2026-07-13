@@ -39,8 +39,8 @@ dev = ["pytest>=7.0"]
 portscan = "portscanner.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/renatoalmeida/network-port-scanner"
-Repository = "https://github.com/renatoalmeida/network-port-scanner"
+Homepage = "https://github.com/Rena24Pt/network-port-scan"
+Repository = "https://github.com/Rena24Pt/network-port-scan"
 
 [tool.setuptools.packages.find]
 where = ["src"]

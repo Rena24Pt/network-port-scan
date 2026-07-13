@@ -1,12 +1,13 @@
 # Network Port Scanner
 
-A fast, multithreaded **TCP port scanner** written in pure Python, with
-**banner grabbing** for service and version detection. Zero third-party
-dependencies — it runs anywhere Python 3.8+ is installed.
+A fast, multithreaded **TCP port scanner** I wrote in pure Python, with
+**banner grabbing** for service and version detection. It has zero third-party
+dependencies, so it runs anywhere Python 3.8+ is installed.
 
-This project was built to demonstrate — and to learn — the fundamentals behind
-tools like `nmap`: **sockets**, the **TCP/IP handshake**, **banner grabbing**,
-and **concurrency** with a thread pool.
+I built this to really understand the machinery behind tools like `nmap` instead
+of just running them. Along the way I got hands-on with **sockets**, the
+**TCP/IP handshake**, **banner grabbing**, and **concurrency** with a thread
+pool — and I documented what I learned below so the repo doubles as my notes.
 
 ```
 $ portscan scanme.nmap.org -p 22,80,443,8080
@@ -20,25 +21,24 @@ PORT      STATE  SERVICE  BANNER
 ```
 
 > ⚠️ **Legal notice**
-> This tool is for **authorised testing and education only**. Scan only systems
-> you **own** or have **explicit written permission** to test. Unauthorised port
-> scanning is illegal in many jurisdictions. You are responsible for how you use
-> it. `scanme.nmap.org` is a host the Nmap project provides expressly for
-> practising scans.
+> This tool is for **authorised testing and education only**. Only scan systems
+> you **own** or have **explicit written permission** to test — unauthorised
+> port scanning is illegal in many places. `scanme.nmap.org`, used in the
+> examples, is a host the Nmap project provides specifically for practising.
 
 ---
 
 ## Features
 
 - **TCP connect scan** — no root privileges required.
-- **Multithreaded** — scans hundreds of ports concurrently via a thread pool.
+- **Multithreaded** — scans hundreds of ports concurrently with a thread pool.
 - **Banner grabbing** — reads service greetings; sends an HTTP `HEAD` probe to
   web ports and completes a **TLS handshake** for HTTPS ports.
 - **Service identification** — maps ports to well-known services and refines the
   guess from the banner.
 - **Flexible port selection** — `top`, `all`, ranges (`1-1024`), or lists
   (`22,80,443`).
-- **Multiple output formats** — a coloured terminal table or structured JSON.
+- **Two output formats** — a coloured terminal table or structured JSON.
 - **Zero dependencies** — standard library only.
 - **Tested** — a pytest suite that exercises the real network path locally.
 
@@ -47,16 +47,16 @@ PORT      STATE  SERVICE  BANNER
 ## Installation
 
 ```bash
-git clone https://github.com/renatoalmeida/network-port-scanner.git
-cd network-port-scanner
+git clone https://github.com/Rena24Pt/network-port-scan.git
+cd network-port-scan
 
-# Install into a virtual environment (recommended)
+# I recommend a virtual environment
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -e .
 ```
 
-This installs the `portscan` command. You can also run it without installing:
+That gives you the `portscan` command. You can also run it without installing:
 
 ```bash
 PYTHONPATH=src python -m portscanner scanme.nmap.org
@@ -102,20 +102,19 @@ portscan 10.0.0.5 -p all -w 500 --no-banner -o report.txt
 
 ---
 
-## The concepts, explained
+## What I learned building this
 
-The code is written to be read. Here is the theory each part demonstrates.
+I wrote the code to be read, and here is the theory behind each part.
 
 ### 1. Sockets
-A **socket** is the operating system's programming interface for network I/O —
-one endpoint of a two-way channel. We create a TCP socket with
-`socket.socket(AF_INET, SOCK_STREAM)`: `AF_INET` selects IPv4, `SOCK_STREAM`
-selects the reliable, ordered, connection-oriented transport, which is TCP.
-See [`scanner.py`](src/portscanner/scanner.py).
+A **socket** is the operating system's interface for network I/O — one endpoint
+of a two-way channel. I create a TCP socket with
+`socket.socket(AF_INET, SOCK_STREAM)`: `AF_INET` selects IPv4 and `SOCK_STREAM`
+selects the reliable, ordered, connection-oriented transport, which is TCP. See
+[`scanner.py`](src/portscanner/scanner.py).
 
 ### 2. TCP/IP and the three-way handshake
-Before any data flows, TCP establishes a connection with a **three-way
-handshake**:
+Before any data flows, TCP sets up a connection with a **three-way handshake**:
 
 ```
 Client            Server
@@ -124,39 +123,38 @@ Client            Server
   |----- ACK ------->|      "Great, connected"
 ```
 
-A **connect scan** simply asks the OS to complete that handshake
-(`connect_ex`). If it succeeds, **the port is open**. If the server replies with
-a **RST** (reset) the port is **closed**; if nothing comes back before the
-timeout, it is **filtered** (typically by a firewall). This scan needs no
-special privileges — a *SYN scan*, which sends a lone SYN and never finishes the
-handshake, must craft raw packets and therefore requires root.
+My **connect scan** just asks the OS to complete that handshake (`connect_ex`).
+If it succeeds, **the port is open**. If the server replies with a **RST**
+(reset) the port is **closed**; if nothing comes back before the timeout, it is
+**filtered** — usually by a firewall. This scan needs no special privileges,
+unlike a *SYN scan*, which sends a lone SYN, never finishes the handshake, and
+has to craft raw packets (so it requires root).
 
 ### 3. Banner grabbing
 When you connect to a service, it often announces itself. SSH, FTP, SMTP, POP3
-and IMAP send a greeting immediately, so we just read it. HTTP servers wait to be
-asked, so we send a minimal `HEAD / HTTP/1.1` request and read the response
-headers (the `Server:` header is gold). For HTTPS we first complete a **TLS
-handshake** and then probe the encrypted stream. This is *service/version
-detection* — the single most useful signal a scan produces, because knowing
-"OpenSSH 6.6.1" is what lets you check it against known vulnerabilities. See
-[`banner.py`](src/portscanner/banner.py).
+and IMAP send a greeting straight away, so I just read it. HTTP servers stay
+silent until asked, so I send a minimal `HEAD / HTTP/1.1` request and read the
+response headers — the `Server:` header is the useful part. For HTTPS I first
+complete a **TLS handshake** and then probe the encrypted stream. This is
+*service/version detection*, and it's the most valuable thing a scan produces:
+knowing "OpenSSH 6.6.1" is exactly what lets you check a host against known
+vulnerabilities. See [`banner.py`](src/portscanner/banner.py).
 
 ### 4. Concurrency with threads
-Scanning is **I/O-bound**: almost all the time is spent *waiting* for the
-network, not using the CPU. A naive scan of 1,000 ports with a 1-second timeout
-could take many minutes because each port waits in turn. By handing ports to a
-**thread pool** (`concurrent.futures.ThreadPoolExecutor`), hundreds of
-connections wait *at the same time*, collapsing that to a couple of seconds.
-Python's GIL is not a bottleneck here because it is **released while a thread
-blocks on a socket**, letting other threads run. See
-[`scanner.py`](src/portscanner/scanner.py).
+Scanning is **I/O-bound** — almost all the time is spent *waiting* on the
+network, not using the CPU. Scanning 1,000 ports one at a time with a 1-second
+timeout could take many minutes. By handing the ports to a **thread pool**
+(`concurrent.futures.ThreadPoolExecutor`), hundreds of connections wait *at the
+same time*, which collapses that to a couple of seconds. Python's GIL isn't a
+problem here because it's **released while a thread is blocked on a socket**, so
+the other threads keep working. See [`scanner.py`](src/portscanner/scanner.py).
 
 ---
 
 ## Project structure
 
 ```
-network-port-scanner/
+network-port-scan/
 ├── src/portscanner/
 │   ├── __init__.py      # package metadata and public API
 │   ├── __main__.py      # enables `python -m portscanner`
@@ -185,15 +183,16 @@ real handshake-and-banner path without touching any external host.
 
 ---
 
-## Roadmap / possible extensions
+## Roadmap
 
-Ideas for taking this further (each is a good learning exercise):
+Things I want to add next — each is a good excuse to learn something new:
 
-- **UDP scanning** — connectionless, so it relies on ICMP "port unreachable"
-  replies and timeouts.
-- **SYN / half-open scan** — using raw sockets (root required); much stealthier.
-- **CIDR ranges** — scan `192.168.1.0/24`, not just single hosts (`ipaddress`).
-- **Rate limiting** — a `--delay` to be gentler and less detectable.
+- **UDP scanning** — connectionless, so it leans on ICMP "port unreachable"
+  replies and timeouts instead of a handshake.
+- **SYN / half-open scan** — using raw sockets (root required); much stealthier
+  and the natural next step from a connect scan.
+- **CIDR ranges** — scan a whole subnet like `192.168.1.0/24` with `ipaddress`.
+- **Rate limiting** — a `--delay` flag to be gentler and less detectable.
 - **CVE lookup** — cross-reference grabbed banners against a vulnerability feed.
 - **IPv6 support** — via `AF_INET6` and `getaddrinfo`.
 - **Async rewrite** — an `asyncio` version to compare against the threaded one.
