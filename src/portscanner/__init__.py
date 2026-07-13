@@ -14,6 +14,7 @@ The public API is intentionally tiny: build a :class:`Scanner` and call
 """
 
 from .scanner import ScanResult, Scanner
+from .synscan import SynScanner
 
 __version__ = "0.1.0"
-__all__ = ["Scanner", "ScanResult", "__version__"]
+__all__ = ["Scanner", "ScanResult", "SynScanner", "__version__"]

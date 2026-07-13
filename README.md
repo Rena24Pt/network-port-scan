@@ -6,8 +6,9 @@ dependencies, so it runs anywhere Python 3.8+ is installed.
 
 I built this to really understand the machinery behind tools like `nmap` instead
 of just running them. Along the way I got hands-on with **sockets**, the
-**TCP/IP handshake**, **banner grabbing**, and **concurrency** with a thread
-pool — and I documented what I learned below so the repo doubles as my notes.
+**TCP/IP handshake**, **banner grabbing**, **concurrency** with a thread pool,
+and a **raw-socket SYN (half-open) scan** where I craft the TCP packets by
+hand — and I documented what I learned below so the repo doubles as my notes.
 
 ```
 $ portscan scanme.nmap.org -p 22,80,443,8080
@@ -31,6 +32,7 @@ PORT      STATE  SERVICE  BANNER
 ## Features
 
 - **TCP connect scan** — no root privileges required.
+- **SYN (half-open) scan** — a stealthier raw-socket scan (`--syn`, needs root).
 - **Multithreaded** — scans hundreds of ports concurrently with a thread pool.
 - **Banner grabbing** — reads service greetings; sends an HTTP `HEAD` probe to
   web ports and completes a **TLS handshake** for HTTPS ports.
@@ -77,6 +79,7 @@ options:
                         a range '1-1024', or a list '22,80,443'
   -t, --timeout SEC     per-port connection timeout in seconds (default: 1.0)
   -w, --workers N       number of concurrent worker threads (default: 100)
+  -S, --syn             stealth SYN (half-open) scan; needs root/Linux
   --no-banner           skip banner grabbing (faster, quieter on the network)
   --json                output results as JSON
   -o, --output FILE     write output to FILE instead of stdout
@@ -98,6 +101,9 @@ portscan example.com -p 22,80,443 --json
 
 # Full range, more threads, no banners, saved to a file
 portscan 10.0.0.5 -p all -w 500 --no-banner -o report.txt
+
+# Stealth SYN scan (raw sockets — must run as root)
+sudo portscan 192.168.1.1 -p 1-1024 --syn
 ```
 
 ---
@@ -149,6 +155,28 @@ same time*, which collapses that to a couple of seconds. Python's GIL isn't a
 problem here because it's **released while a thread is blocked on a socket**, so
 the other threads keep working. See [`scanner.py`](src/portscanner/scanner.py).
 
+### 5. Raw sockets and the SYN (half-open) scan
+The connect scan lets the OS do the handshake for me. For the SYN scan I go a
+layer deeper and build the TCP segment **byte by byte** — source/destination
+ports, sequence number, flags, window — and compute the **TCP checksum** over a
+*pseudo-header* (RFC 1071). I send just that SYN through a **raw socket** and
+read the reply:
+
+* **SYN-ACK** → open. I never send the final ACK, so the connection is only ever
+  *half* open — that's the "half-open" scan, and it's why it's stealthier.
+* **RST** → closed.
+* **no reply** → filtered (a firewall silently dropped the SYN).
+
+Raw sockets need root (`CAP_NET_RAW`), which is exactly why a SYN scan requires
+privileges while a connect scan does not. I kept the packet logic in small pure
+functions so it can be unit-tested with no privileges at all. See
+[`synscan.py`](src/portscanner/synscan.py).
+
+> Note: a userspace SYN scanner has a quirk — because the *kernel* has no record
+> of the connection, it may fire its own RST when the SYN-ACK arrives. Full tools
+> like Nmap add a firewall rule to suppress that; I left it out to keep the code
+> focused on the scanning itself.
+
 ---
 
 ## Project structure
@@ -160,6 +188,7 @@ network-port-scan/
 │   ├── __main__.py      # enables `python -m portscanner`
 │   ├── cli.py           # argparse command-line interface
 │   ├── scanner.py       # core engine: connect scan + thread pool
+│   ├── synscan.py       # raw-socket SYN (half-open) scan
 │   ├── banner.py        # banner grabbing, TLS, service identification
 │   ├── ports.py         # port parsing and well-known service names
 │   └── output.py        # table and JSON rendering
@@ -189,8 +218,6 @@ Things I want to add next — each is a good excuse to learn something new:
 
 - **UDP scanning** — connectionless, so it leans on ICMP "port unreachable"
   replies and timeouts instead of a handshake.
-- **SYN / half-open scan** — using raw sockets (root required); much stealthier
-  and the natural next step from a connect scan.
 - **CIDR ranges** — scan a whole subnet like `192.168.1.0/24` with `ipaddress`.
 - **Rate limiting** — a `--delay` flag to be gentler and less detectable.
 - **CVE lookup** — cross-reference grabbed banners against a vulnerability feed.

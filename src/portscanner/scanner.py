@@ -13,13 +13,30 @@ from .banner import grab_banner, identify_service
 
 @dataclass
 class ScanResult:
-    """The outcome of probing a single TCP port."""
+    """The outcome of probing a single TCP port.
+
+    ``state`` is the richer classification — ``"open"``, ``"closed"`` or, for the
+    SYN scanner, ``"filtered"`` — while ``is_open`` is the simple boolean the
+    table/JSON renderers key off.
+    """
 
     port: int
     is_open: bool
     service: str = ""
     banner: str = ""
     latency_ms: float = 0.0
+    state: str = ""
+
+
+def resolve_host(target: str) -> str:
+    """Resolve a hostname or IP string to an IPv4 address.
+
+    :raises ValueError: if the name cannot be resolved.
+    """
+    try:
+        return socket.gethostbyname(target)
+    except socket.gaierror as exc:
+        raise ValueError(f"could not resolve host {target!r}: {exc}") from exc
 
 
 @dataclass
@@ -47,10 +64,7 @@ class Scanner:
     def __post_init__(self) -> None:
         # Resolve the hostname once, up front, so every worker reuses the same
         # IP and a bad hostname fails fast with a clear error.
-        try:
-            self._ip = socket.gethostbyname(self.target)
-        except socket.gaierror as exc:
-            raise ValueError(f"could not resolve host {self.target!r}: {exc}") from exc
+        self._ip = resolve_host(self.target)
 
     @property
     def ip(self) -> str:
@@ -68,13 +82,17 @@ class Scanner:
             latency_ms = (time.perf_counter() - start) * 1000.0
 
             if not connected:
-                return ScanResult(port, is_open=False, latency_ms=latency_ms)
+                return ScanResult(
+                    port, is_open=False, latency_ms=latency_ms, state="closed"
+                )
 
             banner = ""
             if self.grab_banners:
                 banner = grab_banner(sock, self.target, port, self.timeout)
             service = identify_service(port, banner)
-            return ScanResult(port, True, service, banner, latency_ms)
+            return ScanResult(
+                port, True, service, banner, latency_ms, state="open"
+            )
 
     def scan(
         self,

@@ -11,6 +11,7 @@ from . import __version__
 from .output import format_json, format_table
 from .ports import parse_ports
 from .scanner import Scanner
+from .synscan import SynScanner
 
 _DISCLAIMER = (
     "LEGAL NOTICE: portscanner is for authorised testing and education only.\n"
@@ -54,6 +55,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=100,
         help="number of concurrent worker threads (default: 100)",
+    )
+    parser.add_argument(
+        "-S",
+        "--syn",
+        action="store_true",
+        help="stealth SYN (half-open) scan using raw sockets; needs root/Linux "
+        "and grabs no banners",
     )
     parser.add_argument(
         "--no-banner",
@@ -114,19 +122,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         parser.error("workers must be at least 1")
 
     try:
-        scanner = Scanner(
-            target=args.target,
-            timeout=args.timeout,
-            workers=args.workers,
-            grab_banners=not args.no_banner,
-        )
+        if args.syn:
+            scanner = SynScanner(target=args.target, timeout=args.timeout)
+        else:
+            scanner = Scanner(
+                target=args.target,
+                timeout=args.timeout,
+                workers=args.workers,
+                grab_banners=not args.no_banner,
+            )
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
     if not args.quiet:
+        mode = "SYN (half-open)" if args.syn else "TCP connect"
         print(
-            f"Scanning {scanner.target} ({scanner.ip}) — {len(ports)} port(s)",
+            f"Scanning {scanner.target} ({scanner.ip}) — "
+            f"{len(ports)} port(s), {mode} scan",
             file=sys.stderr,
         )
 
@@ -136,6 +149,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     start = time.perf_counter()
     try:
         results = scanner.scan(ports, progress=_progress if show_progress else None)
+    except PermissionError as exc:
+        # Raw-socket SYN scan without the required privileges.
+        print(f"\nerror: {exc}", file=sys.stderr)
+        return 2
     except KeyboardInterrupt:
         print("\nInterrupted by user.", file=sys.stderr)
         return 130
