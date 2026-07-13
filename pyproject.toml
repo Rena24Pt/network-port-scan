@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "portscanner"
+version = "0.1.0"
+description = "A fast, multithreaded TCP port scanner with banner grabbing and service detection."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "Renato Almeida" }]
+keywords = [
+    "security",
+    "network",
+    "port-scanner",
+    "banner-grabbing",
+    "tcp-ip",
+    "sockets",
+    "cybersecurity",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+    "Topic :: System :: Networking :: Monitoring",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+portscan = "portscanner.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/renatoalmeida/network-port-scanner"
+Repository = "https://github.com/renatoalmeida/network-port-scanner"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

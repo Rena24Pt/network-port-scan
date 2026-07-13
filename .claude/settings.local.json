@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -m pip install pytest --quiet)",
+      "Bash(python3 -m pytest --version)",
+      "Bash(python3 -m venv .venv)",
+      "Bash(.venv/bin/python -m pip install --quiet pytest)",
+      "Bash(.venv/bin/python -m pytest --version)",
+      "Bash(.venv/bin/python -m pip install --quiet -e .)",
+      "Bash(.venv/bin/python -m pytest)"
+    ]
+  }
+}
