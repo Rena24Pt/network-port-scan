@@ -33,6 +33,7 @@ PORT      STATE  SERVICE  BANNER
 
 - **TCP connect scan** — no root privileges required.
 - **SYN (half-open) scan** — a stealthier raw-socket scan (`--syn`, needs root).
+- **Subnet (CIDR) scanning** — sweep a whole range like `192.168.1.0/24`.
 - **Multithreaded** — scans hundreds of ports concurrently with a thread pool.
 - **Banner grabbing** — reads service greetings; sends an HTTP `HEAD` probe to
   web ports and completes a **TLS handshake** for HTTPS ports.
@@ -95,6 +96,9 @@ portscan 192.168.1.1
 
 # Scan the classic well-known range
 portscan 192.168.1.1 -p 1-1024
+
+# Sweep a whole subnet (network + broadcast addresses are skipped)
+portscan 192.168.1.0/24 -p 22,80,443
 
 # Scan specific ports and emit JSON for another tool to consume
 portscan example.com -p 22,80,443 --json
@@ -177,6 +181,14 @@ functions so it can be unit-tested with no privileges at all. See
 > like Nmap add a firewall rule to suppress that; I left it out to keep the code
 > focused on the scanning itself.
 
+### 6. Subnets and CIDR
+A real scan targets a *range*, not one machine. When you pass `192.168.1.0/24`
+I use Python's `ipaddress` module to expand the CIDR block into its individual
+hosts, **skipping the network and broadcast addresses** (`.0` and `.255` in a
+/24) since you can't meaningfully scan those. I also cap how large a range can be
+so a typo like `10.0.0.0/8` (~16 million hosts) fails fast instead of running
+forever. See [`targets.py`](src/portscanner/targets.py).
+
 ---
 
 ## Project structure
@@ -191,6 +203,7 @@ network-port-scan/
 │   ├── synscan.py       # raw-socket SYN (half-open) scan
 │   ├── banner.py        # banner grabbing, TLS, service identification
 │   ├── ports.py         # port parsing and well-known service names
+│   ├── targets.py       # expand a host/CIDR into a list of addresses
 │   └── output.py        # table and JSON rendering
 ├── tests/               # pytest suite
 ├── pyproject.toml       # packaging + console-script entry point
@@ -218,7 +231,9 @@ Things I want to add next — each is a good excuse to learn something new:
 
 - **UDP scanning** — connectionless, so it leans on ICMP "port unreachable"
   replies and timeouts instead of a handshake.
-- **CIDR ranges** — scan a whole subnet like `192.168.1.0/24` with `ipaddress`.
+- **Concurrent host scanning** — sweep many hosts in parallel, not one at a time
+  (with care: the SYN scanner shares a single raw socket, so that path must stay
+  serial or filter replies per host).
 - **Rate limiting** — a `--delay` flag to be gentler and less detectable.
 - **CVE lookup** — cross-reference grabbed banners against a vulnerability feed.
 - **IPv6 support** — via `AF_INET6` and `getaddrinfo`.

@@ -8,10 +8,17 @@ import time
 from typing import Optional, Sequence
 
 from . import __version__
-from .output import format_json, format_table
+from .output import (
+    HostReport,
+    format_json,
+    format_multi_json,
+    format_multi_table,
+    format_table,
+)
 from .ports import parse_ports
 from .scanner import Scanner
 from .synscan import SynScanner
+from .targets import expand_targets
 
 _DISCLAIMER = (
     "LEGAL NOTICE: portscanner is for authorised testing and education only.\n"
@@ -103,6 +110,52 @@ def _progress(done: int, total: int) -> None:
     )
 
 
+def _scan_host(
+    host: str,
+    args: argparse.Namespace,
+    ports: list,
+    index: int,
+    total: int,
+) -> HostReport:
+    """Scan one host and return its report tuple.
+
+    Raises ``ValueError`` if the host cannot be resolved and ``PermissionError``
+    if a SYN scan lacks raw-socket privileges — the caller decides how fatal
+    each is.
+    """
+    if args.syn:
+        scanner = SynScanner(target=host, timeout=args.timeout)
+    else:
+        scanner = Scanner(
+            target=host,
+            timeout=args.timeout,
+            workers=args.workers,
+            grab_banners=not args.no_banner,
+        )
+
+    sweep = total > 1
+    if not args.quiet:
+        if sweep:
+            print(f"[{index}/{total}] scanning {scanner.ip} ...", file=sys.stderr)
+        else:
+            mode = "SYN (half-open)" if args.syn else "TCP connect"
+            print(
+                f"Scanning {scanner.target} ({scanner.ip}) — "
+                f"{len(ports)} port(s), {mode} scan",
+                file=sys.stderr,
+            )
+
+    # A per-port progress bar only makes sense for a single host; during a sweep
+    # the per-host lines above are the progress indicator.
+    use_progress = not args.quiet and not args.json and not sweep
+    start = time.perf_counter()
+    results = scanner.scan(ports, progress=_progress if use_progress else None)
+    duration = time.perf_counter() - start
+    if use_progress:
+        print(file=sys.stderr)  # terminate the progress line
+    return scanner.target, scanner.ip, results, duration
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -122,53 +175,54 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         parser.error("workers must be at least 1")
 
     try:
-        if args.syn:
-            scanner = SynScanner(target=args.target, timeout=args.timeout)
-        else:
-            scanner = Scanner(
-                target=args.target,
-                timeout=args.timeout,
-                workers=args.workers,
-                grab_banners=not args.no_banner,
-            )
+        hosts = expand_targets(args.target)
     except ValueError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
+        parser.error(str(exc))
 
-    if not args.quiet:
+    sweep = len(hosts) > 1
+    if sweep and not args.quiet:
         mode = "SYN (half-open)" if args.syn else "TCP connect"
         print(
-            f"Scanning {scanner.target} ({scanner.ip}) — "
-            f"{len(ports)} port(s), {mode} scan",
+            f"{mode} scan — {len(hosts)} host(s), {len(ports)} port(s) each",
             file=sys.stderr,
         )
 
-    # Progress goes to stderr; it would corrupt JSON on stdout, and is pointless
-    # when the user asked to be quiet.
-    show_progress = not args.quiet and not args.json
-    start = time.perf_counter()
-    try:
-        results = scanner.scan(ports, progress=_progress if show_progress else None)
-    except PermissionError as exc:
-        # Raw-socket SYN scan without the required privileges.
-        print(f"\nerror: {exc}", file=sys.stderr)
-        return 2
-    except KeyboardInterrupt:
-        print("\nInterrupted by user.", file=sys.stderr)
-        return 130
-    duration = time.perf_counter() - start
+    reports: list[HostReport] = []
+    for index, host in enumerate(hosts, start=1):
+        try:
+            reports.append(_scan_host(host, args, ports, index, len(hosts)))
+        except ValueError as exc:
+            # Host could not be resolved: fatal for a single target, but during a
+            # sweep we just skip it and keep going.
+            print(f"error: {exc}", file=sys.stderr)
+            if not sweep:
+                return 2
+        except PermissionError as exc:
+            # Raw-socket SYN scan without the required privileges — always fatal.
+            print(f"\nerror: {exc}", file=sys.stderr)
+            return 2
+        except KeyboardInterrupt:
+            print("\nInterrupted by user.", file=sys.stderr)
+            return 130
 
-    if show_progress:
-        print(file=sys.stderr)  # terminate the progress line
+    if not reports:
+        print("No hosts could be scanned.", file=sys.stderr)
+        return 2
 
     if args.json:
-        rendered = format_json(results, scanner.target, scanner.ip, duration)
+        if sweep:
+            rendered = format_multi_json(reports)
+        else:
+            target, ip, results, duration = reports[0]
+            rendered = format_json(results, target, ip, duration)
     else:
         # Colour only when writing to an interactive terminal.
         color = sys.stdout.isatty() and not args.output
-        rendered = format_table(
-            results, scanner.target, scanner.ip, duration, color=color
-        )
+        if sweep:
+            rendered = format_multi_table(reports, color=color)
+        else:
+            target, ip, results, duration = reports[0]
+            rendered = format_table(results, target, ip, duration, color=color)
 
     if args.output:
         with open(args.output, "w", encoding="utf-8") as fh:

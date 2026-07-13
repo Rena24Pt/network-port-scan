@@ -61,14 +61,15 @@ def format_table(
     return "\n".join(lines)
 
 
-def format_json(
-    results: list[ScanResult],
-    target: str,
-    ip: str,
-    duration: float,
-) -> str:
-    """Render the full scan as a JSON document for piping into other tools."""
-    payload = {
+# A per-host scan report, as accumulated by the CLI: (target, ip, results, secs).
+HostReport = tuple[str, str, list[ScanResult], float]
+
+
+def _host_payload(
+    results: list[ScanResult], target: str, ip: str, duration: float
+) -> dict:
+    """Build the JSON-serialisable dict describing one host's scan."""
+    return {
         "target": target,
         "ip": ip,
         "duration_seconds": round(duration, 3),
@@ -87,4 +88,54 @@ def format_json(
             if r.is_open
         ],
     }
+
+
+def format_json(
+    results: list[ScanResult],
+    target: str,
+    ip: str,
+    duration: float,
+) -> str:
+    """Render a single host's scan as a JSON document."""
+    return json.dumps(_host_payload(results, target, ip, duration), indent=2)
+
+
+def format_multi_json(host_reports: list[HostReport]) -> str:
+    """Render a multi-host (subnet) scan as a JSON document."""
+    payload = {
+        "hosts_scanned": len(host_reports),
+        "hosts_with_open_ports": sum(
+            1 for _, _, results, _ in host_reports if any(r.is_open for r in results)
+        ),
+        "hosts": [
+            _host_payload(results, target, ip, duration)
+            for target, ip, results, duration in host_reports
+        ],
+    }
     return json.dumps(payload, indent=2)
+
+
+def format_multi_table(host_reports: list[HostReport], *, color: bool = True) -> str:
+    """Render a subnet scan: one table per host that has open ports, + a summary.
+
+    Hosts with no open ports are omitted from the body (they would be noise on a
+    large sweep) but still counted in the summary line.
+    """
+    with_open = [
+        report for report in host_reports if any(r.is_open for r in report[2])
+    ]
+    total = len(host_reports)
+    summary = _paint(
+        f"Summary: {total} host(s) scanned, {len(with_open)} with open ports.",
+        _BOLD,
+        color,
+    )
+
+    if not with_open:
+        return f"No open ports found across {total} host(s)."
+
+    blocks = [
+        format_table(results, target, ip, duration, color=color)
+        for target, ip, results, duration in with_open
+    ]
+    return "\n\n".join(blocks) + "\n\n" + summary
